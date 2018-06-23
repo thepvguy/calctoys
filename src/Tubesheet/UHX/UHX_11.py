@@ -171,8 +171,8 @@ class UHX11:
                 if hpRatio <= alphaRow[0]:
                     alphaOut = alphaRow[number]
 
-            elif i == len(alphaTable) and not hpRatio < alphaRow[0]:
-                betaOut = betaRow
+            elif i == len(alphaTable)-1 and not hpRatio < alphaRow[0]:
+                alphaOut = alphaRow[number]
 
             else:
                 if hpRatio < alphaRow[0]:
@@ -226,8 +226,8 @@ class UHX11:
                 if hpRatio <= betaRow[0]:
                     betaOut = betaRow[number]
 
-            elif i == len(betaTable) and not hpRatio < betaRow[0]:
-                betaOut = betaRow
+            elif i == len(betaTable)-1 and not hpRatio < betaRow[0]:
+                betaOut = betaRow[number]
 
             else:
                 if hpRatio < betaRow[0]:
@@ -267,6 +267,22 @@ class UHX11:
         mu_star = self.mu_star()
 
         return beta_0 + beta_1 * mu_star + beta_2 * (mu_star ** 2) + beta_3 * (mu_star ** 3) + beta_4 * (mu_star ** 4)
+
+    @property
+    def result(self):
+        return {
+            "rho": self.rho(),
+            "D_o": self.D_o(),
+            "mu": self.mu(),
+            "p_star": self.p_star(),
+            "d_star":self.d_star(),
+            "mu_star":self.mu_star(),
+            "hg_prime": self.hg_prime(),
+            "h": self.h,
+            "E_star_ratio": self.E_star_ratio(),
+            "E_star":self.E_star(),
+            "vu_star":self.vu_star()
+        }
 
 if __name__ == "__main__":
     params = UHX11Params(

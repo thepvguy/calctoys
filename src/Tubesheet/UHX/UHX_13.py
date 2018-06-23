@@ -1,10 +1,12 @@
 from Table_13_1_and_2 import Table_13_1, Table_13_2
 from _UHX_common import Configuration as cfg
+from copy import deepcopy
 import math
 
 
 class UHX_13_5_calcs:
     def __init__(self, params):
+        self.p_ = params
         """
             Determine D_o, mu, mu_star, h_prime_g from UHX-11.5.1;
             tubesheet parameters
@@ -57,6 +59,7 @@ class UHX_13_5_calcs:
         self.E_s_w = params.E_s_w
         self.S_s_b = params.S_s_b
         self.S_s = params.S_s
+        self.S_y_s = params.S_y_s
 
         """
             Adjacent channel parameters
@@ -67,6 +70,7 @@ class UHX_13_5_calcs:
         self.E_c = params.E_c
         self.S_c = params.S_c
         self.S_PS_c = params.S_PS_c
+        self.S_y_c = params.S_y_c
 
         """
             Tube parameters
@@ -103,10 +107,15 @@ class UHX_13_5_calcs:
         self.__Z_v = None
         self.__Z_w = None
         self.__Z_m = None
+        self.__Z_a = None
         self.__F_m = None
         self.__F_t_min = None
         self.__F_t_max = None
-
+        self.__EP_calcs = None
+        if params.is_EP_calc is None:
+            self.__is_EP_calc = False
+        else:
+            self.__is_EP_calc = params.is_EP_calc
 
     def sanity_check(self):
         if self.config not in [cfg.a, cfg.b, cfg.c, cfg.d]:
@@ -151,7 +160,6 @@ class UHX_13_5_calcs:
             return 0.5 * self.G_c
         else:
             return self.D_c * 0.5
-
 
     @property
     def rho_s(self):
@@ -211,7 +219,7 @@ class UHX_13_5_calcs:
         UHX 13.5.2
         :return: Single tube stiffness
         """
-        return (math.pi * self.t_t * (self.d_t + self.t_t) * self.E_t) / self.L
+        return (math.pi * self.t_t * (self.d_t - self.t_t) * self.E_t) / self.L
 
     @property
     def K_s_t(self):
@@ -275,7 +283,6 @@ class UHX_13_5_calcs:
             return 0
         else:
             return ((self.D_s ** 2)/(4 * self.E_s * self.t_s)) * (1 - 0.5 * self.vu_s)
-
 
     @property
     def beta_c(self):
@@ -344,7 +351,10 @@ class UHX_13_5_calcs:
         UHX 13.5.3
         :return: X_a
         """
-        return (24 * (1 - self.vu_star) * self.N_t * ((self.E_t* self.t_t * (self.d_t - self.t_t) * self.a_o ** 2)/(self.E_star * self.L * self.h ** 3))) ** 0.25
+        coef = 24 * (1 - self.vu_star ** 2) * self.N_t
+        num = self.E_t * self.t_t * (self.d_t - self.t_t) * self.a_o ** 2
+        den = self.E_star * self.L * self.h ** 3
+        return (coef * (num / den)) ** 0.25
 
     def __gettable131values_step3(self):
         table = Table_13_1(self.X_a, self.vu_star)
@@ -353,7 +363,14 @@ class UHX_13_5_calcs:
         self.__Z_m = float(table.Z_m)
         self.__Z_v = float(table.Z_v)
         self.__Z_w = float(table.Z_w)
+        self.__Z_a = float(table.Z_a)
 
+    @property
+    def Z_a(self):
+        if self.__Z_a is None:
+            self.__gettable131values_step3()
+
+        return self.__Z_a
 
     @property
     def Z_d(self):
@@ -403,8 +420,9 @@ class UHX_13_5_calcs:
         return {
             "X_a": self.X_a,
             "Z_d": self.Z_d,
-            "Z_m": self.Z_m,
             "Z_v": self.Z_v,
+            "Z_m": self.Z_m,
+            "Z_a": self.Z_a,
             "Z_w": self.Z_w
         }
 
@@ -430,7 +448,7 @@ class UHX_13_5_calcs:
         UHX 13.5.4
         :return: Phi
         """
-        return (1 - self.vu_star) * self.F
+        return (1 + self.vu_star) * self.F
 
     @property
     def Q_1(self):
@@ -471,6 +489,7 @@ class UHX_13_5_calcs:
             "phi": self.phi,
             "Q_1": self.Q_1,
             "Q_Z_1": self.Q_Z_1,
+            "Q_Z_2": self.Q_Z_2,
             "U": self.U
         }
 
@@ -491,7 +510,7 @@ class UHX_13_5_calcs:
         UHX 13.5.5
         :return: omega_s
         """
-        return self.rho_s * self.k_s * self.beta_s * self.delta_s * (1 - self.h * self.beta_s)
+        return self.rho_s * self.k_s * self.beta_s * self.delta_s * (1 + self.h * self.beta_s)
 
     @property
     def omega_s_star(self):
@@ -507,7 +526,7 @@ class UHX_13_5_calcs:
         UHX 13.5.5
         :return: omega_c
         """
-        return self.rho_c * self.k_c * self.beta_c * (1 + self.beta_c * self.h)
+        return self.rho_c * self.k_c * self.beta_c * self.delta_c * (1 + self.beta_c * self.h)
 
     @property
     def omega_c_star(self):
@@ -529,7 +548,7 @@ class UHX_13_5_calcs:
             return (self.G_c - self.C) / self.D_o
         elif self.config == cfg.c:
             return (self.G_c - self.G_1) / self.D_o
-        else: # config == d
+        else:  # config == d
             return (self.G_c - self.G_s) / self.D_o
 
     def __step_5_results(self):
@@ -549,11 +568,11 @@ class UHX_13_5_calcs:
         :return: Effective shell side pressure
         """
         factor = self.x_s
-        factor += 2 * (1 - self.x_t) * self.vu_t
+        factor += 2 * (1 - self.x_s) * self.vu_t
         factor += ((2 * self.vu_s) / self.K_s_t) * (self.D_s / self.D_o) ** 2
         factor -= ((self.rho_s ** 2) - 1) / (self.J * self.K_s_t)
         if self.has_expansion_joint:
-            factor -= ((1 - self.J) * (self.D_J ** 2) - self.D_s ** 2) / (2 * self.J * self.K_s_t * self.D_o ** 2)
+            factor -= ((1 - self.J) * ((self.D_J ** 2) - self.D_s ** 2)) / (2 * self.J * self.K_s_t * self.D_o ** 2)
         return factor * self.P_s
 
     @property
@@ -589,7 +608,7 @@ class UHX_13_5_calcs:
          UHX 13.5.6
         :return: Effective tubesheet pressure at the rim
         """
-        return -1 * (self.U / self.a_o ** 2) * (self.omega_s * self.P_s - self.omega_c * self.P_t)
+        return -1 * (self.U / self.a_o ** 2) * (self.omega_s_star * self.P_s - self.omega_c_star * self.P_t)
 
     @property
     def P_e(self):
@@ -600,7 +619,7 @@ class UHX_13_5_calcs:
         a = self.J * self.K_s_t
         b = self.Q_Z_1 + (self.rho_s - 1) * self.Q_Z_2
         c = self.P_s_prime - self.P_t_prime + self.P_gamma + self.P_w + self.P_rim
-        return a / (1 + a * b * c)
+        return (a / (1 + a * b)) * c
 
     def __step_6_results(self):
         return {
@@ -665,17 +684,30 @@ class UHX_13_5_calcs:
         :return: Acceptibility of tubesheet max bending stress
         """
         if self.is_operating_case:
-            return math.fabs(self.sigma) <= self.S_PS
+            return abs(self.sigma) <= self.S_PS
         else:
-            return math.fabs(self.sigma) <= 1.5 * self.S
+            return abs(self.sigma) <= 1.5 * self.S
 
     def __step_7_results(self):
         return {
             "Q_2": self.Q_2,
             "Q_3": self.Q_3,
+            "F_m": self.F_m,
+            "h_prime_g": self.h_prime_g,
+            "h - h_prime_g": (self.h - self.h_prime_g),
             "sigma": self.sigma,
+            "1.5 * S": self.S * 1.5,
+            "S_PS": self.S_PS,
             "sigma_acceptable": self.sigma_acceptable
         }
+
+    @property
+    def tau_test(self):
+        """
+        Test condition laid out for tau in 13.5.8
+        :return:
+        """
+        return (1.6 * self.S * self.mu * self.h) / self.a_o
 
     @property
     def tau_needed(self):
@@ -683,9 +715,7 @@ class UHX_13_5_calcs:
         UHX 13.5.8
         :return: Checks if shear stress check is required
         """
-        cond = abs(self.P_e)
-        test = (1.6 * self.S * self.mu * self.h) / self.a_o
-        return cond > test
+        return abs(self.P_e) > self.tau_test
 
     @property
     def tau(self):
@@ -694,7 +724,7 @@ class UHX_13_5_calcs:
         :return: Shear stress
         """
         if self.tau_needed:
-            return (1 / (4 * self.mu))*((1/ self.h) * (4 * self.A_p / self.C_p))*self.P_e
+            return (1 / (4 * self.mu))*((1/self.h) * (4 * self.A_p / self.C_p))*self.P_e
         else:
             return None
 
@@ -707,10 +737,11 @@ class UHX_13_5_calcs:
         if self.tau_needed:
             return math.fabs(self.tau) <= 0.8 * self.S
         else:
-            return None
+            return True
 
     def __step_8_results(self):
         return {
+            "tau_test": self.tau_test,
             "tau_needed": self.tau_needed,
             "tau": self.tau,
             "tau_acceptable": self.tau_acceptable
@@ -817,7 +848,7 @@ class UHX_13_5_calcs:
         UHX 13.5.9(c)(2)
         :return:
         """
-        return 0.25 * ((self.d_t ** 2) + (self.d_t - 2 * self.t_t) ** 2) ** 0.25
+        return (1/4) * ((self.d_t**2) + (self.d_t - 2 * self.t_t) ** 2) ** 0.5
 
     @property
     def F_t(self):
@@ -904,7 +935,7 @@ class UHX_13_5_calcs:
         UHX 13.5.10(a)
         :return: axial shell membrane stress
         """
-        term1 = (self.a_o ** 2) /(self.t_s * (self.D_s + self.t_s))
+        term1 = (self.a_o ** 2) / (self.t_s * (self.D_s + self.t_s))
         term2 = self.P_e + ((self.rho_s ** 2) - 1) * (self.P_s - self.P_t)
         term3 = (self.a_s ** 2) / (self.t_s * (self.D_s + self.t_s))
 
@@ -981,7 +1012,7 @@ class UHX_13_5_calcs:
         UHX 13.5.11 (b)
         :return: membrane stress in the channel
         """
-        return ((self.a_o ** 2) / (self.t_c * (self.D_c + self.t_c))) * self.P_t
+        return ((self.a_c ** 2) / (self.t_c * (self.D_c + self.t_c))) * self.P_t
 
     @property
     def sigma_c_b(self):
@@ -1006,8 +1037,6 @@ class UHX_13_5_calcs:
         """
         return abs(self.sigma_c_m) + abs(self.sigma_c_b)
 
-
-
     @property
     def sigma_s_acceptable(self):
         """
@@ -1031,7 +1060,7 @@ class UHX_13_5_calcs:
             return self.sigma_c <= self.S_PS_c
 
     def __step_11_results(self):
-        if self.config == cfg.d: #  Analysis ends at step 10 for config d
+        if self.config == cfg.d:  # Analysis ends at step 10 for config d
             return {}
 
         shell = {
@@ -1054,7 +1083,74 @@ class UHX_13_5_calcs:
             return shell
 
     @property
+    def is_EP_calc(self):
+        return self.__is_EP_calc
+
+    def get_EP_params(self):
+        if self.__is_EP_calc:
+            return None
+
+        new_params = deepcopy(self.p_)
+        new_params.is_EP_calc = True
+        return new_params
+
+    @property
+    def elastic_plastic(self):
+        return UHX_13_7(self, Bundle(S_y_s=self.S_y_s, S_y_c=self.S_y_c))
+
+    def __step_12_results(self):
+        if self.is_EP_calc:
+            return {}
+
+        else:
+            calc = self.elastic_plastic
+            if calc.is_applicable():
+                return calc.result()
+            else:
+                return {}
+
+    @property
     def results(self):
+        if self.is_EP_calc:
+            result = {
+                "S_c_star": self.elastic_plastic.S_c_star,
+                "S_s_star": self.elastic_plastic.S_s_star,
+                "fact_s": self.elastic_plastic.fact_s,
+                "fact_c": self.elastic_plastic.fact_c,
+                "proceed_to_c": self.elastic_plastic.proceed_to_c
+            }
+
+            if self.elastic_plastic.proceed_to_c:
+                additional_results = {
+                    "E_s_star": self.E_s_star,
+
+                    "E_c_star": self.E_c_star,
+                    "k_s": self.__get_second_UHX_calc().k_s,
+                    "lambda_s": self.__get_second_UHX_calc().lambda_s,
+                    "k_c": self.__get_second_UHX_calc().k_c,
+                    "lambda_c": self.__get_second_UHX_calc().lambda_c,
+                    "F": self.__get_second_UHX_calc().F,
+                    "phi": self.__get_second_UHX_calc().phi,
+                    "Q_1": self.__get_second_UHX_calc().Q_1,
+                    "Q_Z_1": self.__get_second_UHX_calc().Q_Z_1,
+                    "Q_Z_2": self.__get_second_UHX_calc().Q_Z_2,
+                    "U": self.__get_second_UHX_calc().U,
+                    "P_w": self.__get_second_UHX_calc().P_w,
+                    "P_rim": self.__get_second_UHX_calc().P_rim,
+                    # TODO: Only recalculate subsequent values with new P_w and P_rim
+                    # TODO: For some reason, P_s, P_t, P_gamma aren't re-calculated
+                    "P_e": self.__get_second_UHX_calc().P_e,
+                    "Q_2": self.__get_second_UHX_calc().Q_2,
+                    "Q_3": self.__get_second_UHX_calc().Q_3,
+                    "F_m": self.__get_second_UHX_calc().F_m,
+                    "sigma": self.__get_second_UHX_calc().sigma,
+                    "sigma_acceptable": self.sigma_acceptable
+                }
+                result = {**result, **additional_results}
+
+            return result
+
+
         inputs = {}
         outputs = {
             1: self.__step_1_results(),
@@ -1067,7 +1163,8 @@ class UHX_13_5_calcs:
             8: self.__step_8_results(),
             9: self.__step_9_results(),
             10: self.__step_10_results(),
-            11: self.__step_11_results()
+            11: self.__step_11_results(),
+            12: self.__step_12_results()
         }
 
         return {
@@ -1076,37 +1173,153 @@ class UHX_13_5_calcs:
         }
 
 
+class UHX_13_7:
+    def __init__(self, parent, params):
+        self.parent = parent
+        self.S_y_s = params.S_y_s
+        self.S_y_c = params.S_y_c
+        self.__new_UHX_calc = None
+
+    def is_applicable(self):
+        applicable = True
+
+        # General sanity checks
+        if self.parent.config == cfg.d:
+            raise ValueError("How'd you call the EP procedure for a config d fixed exchanger?")
+
+        # Check if parent tubesheet stresses are OK
+        # UHX 13.7.1 Scope; second paragraph
+        if not (self.parent.tau_acceptable and self.parent.sigma_acceptable):
+            applicable = False
+
+        # Maybe not appropriate to check here since it's only concerned with the tubesheet
+        # Check if tube stresses are OK. This won't help if tubes are overstressed.
+        # if not (
+        #                self.parent.sigma_t_max_acceptable and
+        #                self.parent.W_t_acceptable and
+        #                self.parent.sigma_t_min_acceptable
+        # ):
+        #    applicable = False
+
+        # check if time dependent properties govern; TODO
+        # if parent.material.has_note("G7"):
+        #    return applicable = False
+
+        # UHX 13.7.2(b)
+        if self.parent.is_operating_case:
+            applicable = False
+
+        # UHX 13.7.2(c)
+        if self.parent.config == cfg.a:
+            if self.parent.sigma_s > self.parent.S_PS_s or self.parent.sigma_c > self.parent.S_PS_c:
+                applicable = False
+
+        # UHX 13.7.2(d)
+        if self.parent.config in [cfg.b, cfg.c]:
+            if self.parent.sigma_s > self.parent.S_PS_s:
+                applicable = False
+
+        # UHX 13.7.2(e) -- can't do this recursively :)
+        if self.parent.is_EP_calc:
+            applicable = False
+
+        return applicable
+
+    @property
+    def S_s_star(self):
+        return min(self.S_y_s, 0.5 * self.parent.S_PS_s)
+
+    @property
+    def S_c_star(self):
+        if self.parent.config == cfg.a:
+            return min(self.S_y_c, 0.5 * self.parent.S_PS_c)
+        else:
+            return None
+
+    @property
+    def fact_s(self):
+        return min((1.4 - 0.4 * (abs(self.parent.sigma_s_b)/self.S_s_star)), 1)
+
+    @property
+    def fact_c(self):
+        return min((1.4 - 0.4 * (abs(self.parent.sigma_c_b)/self.S_c_star)), 1)
+
+    @property
+    def proceed_to_c(self):
+        proceed = True
+        if self.fact_s == 1:
+            if self.parent.config == cfg.a:
+                if self.fact_c == 1:
+                    proceed = False
+            else:
+                proceed = False
+
+        return proceed
+
+    @property
+    def E_s_star(self):
+        return self.parent.E_s * self.fact_s
+
+    @property
+    def E_c_star(self):
+        if self.parent.config == cfg.a:
+            return self.parent.E_c * self.fact_c
+        else:
+            return None
+
+    def __generate_new_params(self):
+        new_params = self.parent.get_EP_params()
+        new_params.S_s = self.S_s_star
+        new_params.S_c = self.S_c_star
+        new_params.E_s = self.E_s_star
+        new_params.E_c = self.E_c_star
+
+        return new_params
+
+    def __get_second_UHX_calc(self):
+        if self.__new_UHX_calc is None:
+            self.__new_UHX_calc = UHX_13_5_calcs(self.__generate_new_params())
+
+        return self.__new_UHX_calc
+
+    @property
+    def sigma_acceptable(self):
+        return abs(self.__new_UHX_calc.sigma) <= 1.5 * self.parent.S
+
+
 class Bundle:
+    # a nice way of wrapping up a bunch of variables into a convenient little package
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
     def add(self, **kwargs):
         self.__dict__.update(kwargs)
 
+
 if __name__ == "__main__":
     import UHX_11
-    p = Bundle(
-        r_o=11.5,
-        d_t=1,
-        t_t=0.049,
-        E_t_T=26200000,
-        E=26200000,
-        S_t_T=23200,
-        S=24500,
-        p=1.25,
-        A_L=0,
-        h_g=0,
-        CA_t=0,
-        h=2)
-    p.add(l_x = (0.95 * p.h))
-    p.add(pitch_type = UHX_11.PitchType.TRIANGLE)
+    p = Bundle()
+    p.add(r_o=20.125)
+    p.add(d_t=1)
+    p.add(t_t=0.049)
+    p.add(E_t_T=26400000)
+    p.add(E=26400000)
+    p.add(S_t_T=13400/0.85)
+    p.add(S=15800)
+    p.add(p=1.25)
+    p.add(A_L=0)
+    p.add(h_g=0)
+    p.add(CA_t=0)
+    p.add(h=1.375)
+    p.add(l_x=1.25)
+    p.add(pitch_type=UHX_11.PitchType.TRIANGLE)
 
-    tlo_calc_pasrams = UHX_11.UHX11Params(
+    tlo_calc_params = UHX_11.UHX11Params(
         radius_to_outermost_tube_hole_center= p.r_o,
         nominal_tube_OD=p.d_t,
         nominal_tube_wall_thickness=p.t_t,
         modulus_of_elasticity_of_tubes_at_tubesheet_design_temperature=p.E_t_T,
-        modulus_of_elasticity_for_tubesheet_material_at_tubesheet_design_temperature=p.S,
+        modulus_of_elasticity_for_tubesheet_material_at_tubesheet_design_temperature=p.E,
         allowable_stress_of_tubes_at_tubesheet_design_temperature=p.S_t_T,
         allowable_stress_for_tubesheet_material_at_tubesheet_design_temperature=p.S,
         tube_pitch=p.p,
@@ -1118,57 +1331,70 @@ if __name__ == "__main__":
         pitch_type=p.pitch_type
     )
 
-    tlo_calcs = UHX_11.UHX11(tlo_calc_pasrams)
+    tlo_calcs = UHX_11.UHX11(tlo_calc_params)
     p.add(D_o=tlo_calcs.D_o())
     p.add(mu=tlo_calcs.mu())
     p.add(mu_star=tlo_calcs.mu_star())
     p.add(h_prime_g=tlo_calcs.hg_prime())
     p.add(vu_star=tlo_calcs.vu_star())
     p.add(E_star=tlo_calcs.E_star())
-    p.add(A=26)
+    p.add(A=43.125)
     p.add(C=0)
-    p.add(S_PS=0)
+    p.add(S_PS=47400)
     p.add(W_star=0)
     p.add(config=cfg.a)
     p.add(is_operating_case=False)
-    p.add(P_s=235)
-    p.add(P_t=260)
-    p.add(T_t_m=150)
-    p.add(E_t=26200000)
+
+    p.add(T=400)
+    p.add(S_y=17500)
+    p.add(vu=0.3)
+
+    p.add(P_s=325)
+
+    p.add(P_t=0)   # 200)
+    p.add(T_t=300)
+    p.add(T_t_m=113)
+    p.add(E_t=27000000)
+
+    p.add(T_s=400)
     p.add(T_a=70)
-    p.add(T_s_m=375)
+    p.add(T_s_m=151)
     p.add(G_c=0)
     p.add(G_s=0)
     p.add(G_1=0)
-    p.add(D_s=24)
-    p.add(t_s=0.375)
-    p.add(E_s=26900000)
-    p.add(L=236)
+    p.add(D_s=42)
+    p.add(t_s=0.5625)
+    p.add(E_s=26400000)
+    p.add(L=237.25)
     p.add(vu_s=0.3)
-    p.add(alpha_s_m=0.00000705)
-    p.add(S_PS_s=0)
-    p.add(E_s_w=0)
+    p.add(alpha_s_m=0.000008802)
+    p.add(S_PS_s=70000)
+    p.add(E_s_w=0.85)
     p.add(S_s_b=0)
-    p.add(S_s=19700)
-    p.add(D_c=24)
+    p.add(S_s=15800)
+
+    p.add(T_c=300)
+    p.add(D_c=42.125)
     p.add(vu_c=0.3)
-    p.add(t_c=1)
-    p.add(E_c=27900000)
+    p.add(t_c=0.375)
+    p.add(E_c=28300000)
     p.add(S_c=20000)
-    p.add(S_PS_c=0)
-    p.add(N_t=240)
-    p.add(alpha_t_m=00.0000072)
+    p.add(S_PS_c=67200)
+    p.add(N_t=955)
+    p.add(alpha_t_m=0.00000865)
     p.add(vu_t=0.3)
     p.add(A_p=0)
     p.add(C_p=0)
     p.add(L_max=20000)
-    p.add(S_t=23200)
-    p.add(k=.6)
-    p.add(l=26.7647)
-    p.add(S_y_t=48800)
+    p.add(S_t=14200 / 0.85)
+    p.add(k=1)
+    p.add(l=48)
+    p.add(S_y_t=19200)
     p.add(has_expansion_joint=False)
     p.add(K_J=6000000)
-
+    p.add(S_y_s=17500)
+    p.add(S_y_c=33600)
+    p.add(is_EP_calc = False)
 
     hx_calcs = UHX_13_5_calcs(p)
     res = hx_calcs.results
@@ -1181,4 +1407,5 @@ if __name__ == "__main__":
                 pretty(value, indent + 1)
             else:
                 print('\t' * (indent + 1) + str(value))
+    pretty(tlo_calcs.result)
     pretty(res)

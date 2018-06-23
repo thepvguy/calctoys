@@ -70,12 +70,39 @@ class Spacer:
         self.material = material
 
 
-class AbstractFlange(metaclass=abc.ABCMeta):
+class FlangeData:
+    def __init__(
+            self,
+            material,
+            attachment_sketch,
+            outer_diameter,
+            inner_diameter,
+            bolt_circle,
+            bolt_hole_diameter,
+            number_of_bolts,
+            thickness,
+            hub=None
+    ):
+        self.material = material
+        self.attachment_sketch = attachment_sketch
+        self.A = outer_diameter
+        self.B = inner_diameter
+        self.C = bolt_circle
+        self.D = bolt_hole_diameter
+        self.n = number_of_bolts
+        self.thickness = thickness
+        self.hub = hub
+
+    def E(self, temperature):
+        return self.material.E(temperature)
+
+
+class AbstractFlangeCalculation(metaclass=abc.ABCMeta):
     def __init__(
             self,
             design_data,
+            # flange_data,
             material,
-            attachment_sketch,
             bolting,
             outer_diameter,
             inner_diameter,
@@ -85,10 +112,12 @@ class AbstractFlange(metaclass=abc.ABCMeta):
             thickness,
             rim_contact_diameter,
             gasket,
+            attachment_sketch,
             hub=None
     ):
         super().__init__()
         self.design_data = design_data
+        # self.flange_data = flange_data  TODO: refactor this
         self.material = material
         self.bolting = bolting
         self.A = outer_diameter
@@ -276,32 +305,7 @@ class AbstractFlange(metaclass=abc.ABCMeta):
     def r_E(self):
         return self.E / self.bolting.E(self.design_data.temperature)
 
-
     # -- BEGIN CLASS SPECIFIC EQUATIONS; POSSIBLE REFACTOR NEEDED --
-
-    @property
-    @abc.abstractmethod
-    def F_prime(self):
-        NotImplementedError("F_prime")
-        return 0
-
-    @property
-    @abc.abstractmethod
-    def l(self):
-        NotImplementedError("l")
-        return 0
-
-    @property
-    @abc.abstractmethod
-    def M_S(self):
-        NotImplementedError("M_S")
-        return 0
-
-    @property
-    @abc.abstractmethod
-    def E_theta_B(self):
-        NotImplementedError("theta_b")
-        return 0
 
     @property
     @abc.abstractmethod
@@ -327,32 +331,8 @@ class AbstractFlange(metaclass=abc.ABCMeta):
         NotImplementedError("S_i")
         return 0
 
-    @property
-    @abc.abstractmethod
-    def S_R_BC(self):
-        NotImplementedError("S_R_BC")
-        return 0
 
-    @property
-    @abc.abstractmethod
-    def S_R(self):
-        NotImplementedError("S_R")
-        return 0
-
-    @property
-    @abc.abstractmethod
-    def S_T(self):
-        NotImplementedError("S_T")
-        return 0
-
-    @property
-    @abc.abstractmethod
-    def S_H(self):
-        NotImplementedError("S_H")
-        return 0
-
-
-class FlangeClass1(AbstractFlange):
+class FlangeClass1(AbstractFlangeCalculation):
     def __init__(
             self,
             design_data,
@@ -481,6 +461,229 @@ class FlangeClass1(AbstractFlange):
             v = self.V_L
 
         return (self.h_o * self.E_theta_B * self.f) / (0.91 * ((self.hub.g_1 / self.hub.g_o) ** 2) * self.B_1 * v)
+
+    @property
+    def F_prime(self):
+        if self.category == FlangeCategory.cat3:
+            return 0
+
+        if self.category == FlangeCategory.cat1:
+            v = self.V
+            F = self.F
+        else:  # self.category == FlangeCategory.cat2:
+            v = self.V_L
+            F = self.F_L
+
+        return (self.hub.g_o ** 2) * (self.h_o + F * self.t) / v
+
+
+class FlangeClass3(AbstractFlangeCalculation):
+    def __init__(
+            self,
+            design_data,
+            bolting,
+            gasket,
+            rim_contact_diameter,
+            main_flange,
+            reducer_flange,
+            hub=None):
+
+        super().__init__(
+            design_data,
+            material=main_flange.material,
+            attachment_sketch=main_flange.attachment_sketch,
+            bolting=bolting,
+            outer_diameter=main_flange.A,
+            inner_diameter=main_flange.B,
+            bolt_circle=main_flange.C,
+            bolt_hole_diameter=main_flange.D,
+            number_of_bolts=main_flange.n,
+            thickness=main_flange.t,
+            rim_contact_diameter=rim_contact_diameter,
+            gasket=gasket,
+            hub=hub
+        )
+
+        self.reducer_flange = reducer_flange
+
+    @property
+    def E_1_star(self):
+        return self.E * self.t ** 3
+
+    @property
+    def E_2_star(self):
+        return self.reducer_flange.E(self.design_data.temperature) * self.reducer_flange.t ** 3
+
+    @property
+    def X(self):
+        return self.E_1_star / (self.E_1_star + self.E_2_star)
+
+    @property
+    def C_2(self):
+        factor1 = (math.pi / 32) * (self.design_data.P * self.B_1 ** 3)
+        factor2 = 1.3 * self.J_P * self.M_P
+        factor3 = 1 + 1.3 * self.J_S
+        return (factor1 - factor2) / factor3
+
+    @property
+    def C_3(self):
+        if self.F_1_prime == 0:
+            return 0
+
+        num = -(0.575 - 1.206 * self.J_S * math.log10(self.A / self.B_1))
+        den = self.J_S + ((self.t ** 3) / self.F_1_prime)
+        return num / den
+
+    @property
+    def C_4(self):
+        if self.F_1_prime == 0:
+            return 0
+
+        return (- self.J_P * self.M_P) / (self.J_S + ((self.t ** 3) / self.F_1_prime))
+
+    @property
+    def F_1_prime(self):
+        if self.category == FlangeCategory.cat3:
+            return 0
+
+        if self.category == FlangeCategory.cat1:
+            f = self.F
+            v = self.V
+        else:
+            f = self.F_L
+            v = self.V_L
+
+        return (self.hub.g_o ** 2) * (self.h_o + f * self.t) / v
+
+    @property
+    def E_1_star_theta_rb_1(self):
+        num = self.X * (self.C_4 - self.C_2)
+        den = 1.206 * math.log10(self.A / self.B_1) - self.X * self.C_3 - (1 - self.X) * self.C_1
+        return num / den
+
+    @property
+    def E_2_star_theta_rb_2(self):
+        return -self.E_1_star_theta_rb_1 * (self.E_2_star / self.E_1_star)
+
+    @property
+    def M_S_1(self):
+        return self.C_3 * self.E_1_star_theta_rb_1 + self.C_4
+
+    @property
+    def M_S_2(self):
+        return self.C_1 * self.E_2_star_theta_rb_2 + self.C_2
+
+    @property
+    def M_u_1(self):
+        return 1.1206 * self.E_1_star_theta_rb_1 * math.log10(self.A / self.B_1)
+
+    @property
+    def M_u_2(self):
+        return 1.206 * self.E_2_star_theta_rb_2 * math.log10(self.A / self.B_1)
+
+    @property
+    def M_b_1(self):
+        return self.M_S_1 - self.M_u_1
+
+    @property
+    def M_b_2(self):
+        return self.M_S_2 - self.M_u_2
+
+    @property
+    def E_1_theta_B_1(self):
+        fac1 = 5.46 / (math.pi / self.t ** 3)
+        fac2 = self.J_S * self.M_b_1 + self.J_P * self.M_P
+        fac3 = self.E_1_star_theta_rb_1 / (self.t ** 3)
+        return fac1 * fac2 + fac3
+
+    @property
+    def E_2_theta_B_2(self):
+        return (-1.337 * (self.M_S_2 - ((math.pi / 32) * self.design_data.P * self.B_1 ** 3))) \
+               / self.reducer_flange.t ** 3
+
+    @property
+    def H_C(self):
+        return (self.M_P + self.M_b_1) / self.h_C
+
+    @property
+    def W_m_1(self):
+        return self.H + self.H_G + self.H_C
+
+    @property
+    def sigma_b(self):
+        return self.W_m_1 / (self.bolting.root_area * self.n)
+
+    @property
+    def S_i(self):
+        num = 1.159 * (self.M_P + self.M_b_1) * self.h_C ** 2
+        den = 2 * (1 - self.X) * self.a * self.l * self.r_E * self.B_1 * self.t ** 3
+        return self.sigma_b - (num / den)
+
+    @property
+    def S_R_1(self):
+        if self.category == FlangeCategory.cat3:
+            return 0
+
+        if self.category == FlangeCategory.cat1:
+            f = self.F
+        else:
+            f = self.F_L
+
+        return -(2 * f * self.t / (self.h_o + f * self.t)) * (self.M_S_1 / (math.pi * self.B_1 * self.t ** 2))
+
+    @property
+    def S_T_1(self):
+        term1 = self.t * self.E_1_theta_B_1
+
+        if self.category == FlangeCategory.cat3:
+            return term1
+
+        else:
+            if self.category == FlangeCategory.cat1:
+                f = self.F
+            else:
+                f = self.F_L
+
+            return term1 + ((2 * f * self.t * self.Z) / (self.h_o + f * self.t)) * (self.M_S_1 / (math.pi * self.B_1 * self.t ** 2))
+
+    @property
+    def S_H_1(self):
+        if self.category == FlangeCategory.cat3:
+            return 0
+
+        else:
+            if self.category == FlangeCategory.cat1:
+                v = self.V
+                f = self.f
+            else:
+                v = self.V_L
+                f = 1
+
+            return (self.h_o * self.E_1_theta_B_1 * f) / (0.91 * self.B_1 * v * (self.hub.g_1 / self.hub.g_o) ** 2)
+
+    @property
+    def S_R_2_BC(self):
+        return (6 * (self.M_P + self.M_S_2)) / ((math.pi * self.C - self.n * self.D) * self.reducer_flange.t ** 2)
+
+    @property
+    def S_R_2_B_1(self):
+        return (2 * self. M_S_2) / (math.pi * self.B_1 * self.reducer_flange.t ** 2)
+
+    @property
+    def S_T_2(self):
+        return ((self.reducer_flange.t * self.E_2_theta_B_2) / self.B_1) -\
+               ((1.8 * self.M_S_2) / (math.pi * self.B_1 * self.reducer_flange.t ** 2))
+
+    @property
+    def S_R_2_Center(self):
+        return ((0.3094 * self.design_data.P * self.B_1 ** 2) / (self.reducer_flange.t ** 2)) -\
+               ((6 * self.M_S_2) / (math.pi * self.B_1 * self.reducer_flange.t ** 2))
+
+# TODO  : implement acceptability checks in class 1 and 3
+# TODO  : implement reporting
+# TODO  : implement class 2 assembly
+# TODO  : implement overridable loads that can come from neighboring flange
+# TODO  : implement assembly class for dissimilar flanges not otherwise explicitly defined in Appendix Y
 
 
 class FlangeCategory(enum.Enum):
